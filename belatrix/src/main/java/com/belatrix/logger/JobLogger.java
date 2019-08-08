@@ -1,17 +1,8 @@
 package main.java.com.belatrix.logger;
 
-import java.io.File;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.Statement;
-import java.text.DateFormat;
-import java.util.Date;
 import java.util.Map;
-import java.util.Properties;
-import java.util.logging.ConsoleHandler;
-import java.util.logging.FileHandler;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+
+import javax.naming.ConfigurationException;
 
 public class JobLogger {
 	private static boolean logToFile;
@@ -20,13 +11,11 @@ public class JobLogger {
 	private static boolean logWarning;
 	private static boolean logError;
 	private static boolean logToDatabase;
-	private boolean initialized;
-	private static Map dbParams;
-	private static Logger logger;
+	private static Map<String, String> dbParams;
 
 	public JobLogger(boolean logToFileParam, boolean logToConsoleParam, boolean logToDatabaseParam,
-			boolean logMessageParam, boolean logWarningParam, boolean logErrorParam, Map dbParamsMap) {
-		logger = Logger.getLogger("MyLog");  
+			boolean logMessageParam, boolean logWarningParam, boolean logErrorParam, Map<String, String> dbParamsMap)
+			throws ConfigurationException {
 		logError = logErrorParam;
 		logMessage = logMessageParam;
 		logWarning = logWarningParam;
@@ -34,76 +23,51 @@ public class JobLogger {
 		logToFile = logToFileParam;
 		logToConsole = logToConsoleParam;
 		dbParams = dbParamsMap;
+		validateAtributes();
 	}
 
-	public static void LogMessage(String messageText, boolean message, boolean warning, boolean error) throws Exception {
-		messageText.trim();
+	private void validateAtributes() throws ConfigurationException {
+		if (!logToConsole && !logToFile && !logToDatabase) {
+			throw new ConfigurationException("Invalid configuration");
+		}
+		if (!logError && !logMessage && !logWarning) {
+			throw new ConfigurationException("Log Type must be specified");
+		}
+		if (dbParams == null) {
+			throw new ConfigurationException("DB Params must be specified");
+		}
+	}
+
+	public static void LogMessage(String messageText, boolean message, boolean warning, boolean error)
+			throws Exception {
+
 		if (messageText == null || messageText.length() == 0) {
 			return;
 		}
-		if (!logToConsole && !logToFile && !logToDatabase) {
-			throw new Exception("Invalid configuration");
+		if (!message && !warning && !error) {
+			throw new IllegalArgumentException("Error or Warning or Message must be specified");
 		}
-		if ((!logError && !logMessage && !logWarning) || (!message && !warning && !error)) {
-			throw new Exception("Error or Warning or Message must be specified");
+		Log log = null;
+		if (message) {
+			log = new LogMassage(logMessage, logWarning, logError);
 		}
-
-		Connection connection = null;
-		Properties connectionProps = new Properties();
-		connectionProps.put("user", dbParams.get("userName"));
-		connectionProps.put("password", dbParams.get("password"));
-
-		connection = DriverManager.getConnection("jdbc:" + dbParams.get("dbms") + "://" + dbParams.get("serverName")
-				+ ":" + dbParams.get("portNumber") + "/", connectionProps);
-
-		int t = 0;
-		if (message && logMessage) {
-			t = 1;
+		if (warning) {
+			log = new LogWarning(logMessage, logWarning, logError);
+		}
+		if (error) {
+			log = new LogError(logMessage, logWarning, logError);
 		}
 
-		if (error && logError) {
-			t = 2;
+		if (logToFile) {
+			log.logToFile(dbParams.get("logFileFolder"), messageText);
 		}
 
-		if (warning && logWarning) {
-			t = 3;
+		if (logToConsole) {
+			log.logToConsole(messageText);
 		}
 
-		Statement stmt = connection.createStatement();
-
-		String l = null;
-		File logFile = new File(dbParams.get("logFileFolder") + "/logFile.txt");
-		if (!logFile.exists()) {
-			logFile.createNewFile();
-		}
-		
-		FileHandler fh = new FileHandler(dbParams.get("logFileFolder") + "/logFile.txt");
-		ConsoleHandler ch = new ConsoleHandler();
-		
-		if (error && logError) {
-			l = l + "error " + DateFormat.getDateInstance(DateFormat.LONG).format(new Date()) + messageText;
-		}
-
-		if (warning && logWarning) {
-			l = l + "warning " +DateFormat.getDateInstance(DateFormat.LONG).format(new Date()) + messageText;
-		}
-
-		if (message && logMessage) {
-			l = l + "message " +DateFormat.getDateInstance(DateFormat.LONG).format(new Date()) + messageText;
-		}
-		
-		if(logToFile) {
-			logger.addHandler(fh);
-			logger.log(Level.INFO, messageText);
-		}
-		
-		if(logToConsole) {
-			logger.addHandler(ch);
-			logger.log(Level.INFO, messageText);
-		}
-		
-		if(logToDatabase) {
-			stmt.executeUpdate("insert into Log_Values('" + message + "', " + String.valueOf(t) + ")");
+		if (logToDatabase) {
+			log.logToDatabase(dbParams, messageText);
 		}
 	}
 }
